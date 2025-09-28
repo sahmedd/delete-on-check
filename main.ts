@@ -26,19 +26,24 @@ export default class DeleteOnCheckPlugin extends Plugin {
 	}
 
 	private async handleFileModify(file: TFile) {
-		// Check if this is the active file and if it has the tag
-		const activeFile = this.app.workspace.getActiveFile();
-		if (!activeFile || activeFile.path !== file.path) return;
-
 		const fileContent = await this.app.vault.read(file);
-		if (!fileContent.includes('#deleteoncheck')) return;
 
-		// Get the active editor
-		const activeView = this.app.workspace.getActiveViewOfType(MarkdownView);
-		if (!activeView) return;
+		// Check if the modified file itself has the #deleteoncheck tag
+		if (fileContent.includes('#deleteoncheck')) {
+			// Handle direct file modifications
+			const activeFile = this.app.workspace.getActiveFile();
+			if (activeFile && activeFile.path === file.path) {
+				const activeView = this.app.workspace.getActiveViewOfType(MarkdownView);
+				if (activeView) {
+					const editor = activeView.editor;
+					this.processCheckedTasks(editor, fileContent);
+					return;
+				}
+			}
 
-		const editor = activeView.editor;
-		this.processCheckedTasks(editor, fileContent);
+			// Handle modifications when file is not active (like from dataview)
+			this.processCheckedTasksInFile(file, fileContent);
+		}
 	}
 
 	private async handleEditorChange(editor: Editor, info: any) {
@@ -69,18 +74,43 @@ export default class DeleteOnCheckPlugin extends Plugin {
 		}
 	}
 
+	private async processCheckedTasksInFile(file: TFile, content: string) {
+		const lines = content.split('\n');
+		const checkedTaskRegex = /^(\s*)-\s+\[x\]\s+(.*)$/i;
+
+		let hasChanges = false;
+		const newLines: string[] = [];
+
+		// Process all lines, excluding checked tasks
+		for (let i = 0; i < lines.length; i++) {
+			if (checkedTaskRegex.test(lines[i])) {
+				console.log(`Deleting checked task in ${file.path}: ${lines[i]}`);
+				hasChanges = true;
+				// Skip this line (don't add to newLines)
+			} else {
+				newLines.push(lines[i]);
+			}
+		}
+
+		// Write back to file if changes were made
+		if (hasChanges) {
+			const newContent = newLines.join('\n');
+			await this.app.vault.modify(file, newContent);
+		}
+	}
+
 	private deleteTaskLine(editor: Editor, lineNumber: number) {
 		const currentLine = editor.getLine(lineNumber);
 		const checkedTaskRegex = /^(\s*)-\s+\[x\]\s+(.*)$/i;
-		
+
 		if (checkedTaskRegex.test(currentLine)) {
 			const lineStart = { line: lineNumber, ch: 0 };
 			let lineEnd = { line: lineNumber + 1, ch: 0 };
-			
+
 			// Handle case where it's the last line
 			if (lineNumber === editor.lastLine()) {
 				lineEnd = { line: lineNumber, ch: currentLine.length };
-				
+
 				// If there's a previous line, remove the newline from previous line
 				if (lineNumber > 0) {
 					const prevLine = editor.getLine(lineNumber - 1);
@@ -88,7 +118,7 @@ export default class DeleteOnCheckPlugin extends Plugin {
 					lineStart.ch = prevLine.length;
 				}
 			}
-			
+
 			editor.replaceRange('', lineStart, lineEnd);
 		}
 	}

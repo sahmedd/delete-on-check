@@ -48,17 +48,19 @@ var DeleteOnCheckPlugin = class extends import_obsidian.Plugin {
     console.log("Unloading Delete on Check plugin");
   }
   async handleFileModify(file) {
-    const activeFile = this.app.workspace.getActiveFile();
-    if (!activeFile || activeFile.path !== file.path)
-      return;
     const fileContent = await this.app.vault.read(file);
-    if (!fileContent.includes("#deleteoncheck"))
-      return;
-    const activeView = this.app.workspace.getActiveViewOfType(import_obsidian.MarkdownView);
-    if (!activeView)
-      return;
-    const editor = activeView.editor;
-    this.processCheckedTasks(editor, fileContent);
+    if (fileContent.includes("#deleteoncheck")) {
+      const activeFile = this.app.workspace.getActiveFile();
+      if (activeFile && activeFile.path === file.path) {
+        const activeView = this.app.workspace.getActiveViewOfType(import_obsidian.MarkdownView);
+        if (activeView) {
+          const editor = activeView.editor;
+          this.processCheckedTasks(editor, fileContent);
+          return;
+        }
+      }
+      this.processCheckedTasksInFile(file, fileContent);
+    }
   }
   async handleEditorChange(editor, info) {
     const activeFile = this.app.workspace.getActiveFile();
@@ -79,6 +81,24 @@ var DeleteOnCheckPlugin = class extends import_obsidian.Plugin {
         console.log(`Deleting checked task on line ${i + 1}: ${lines[i]}`);
         this.deleteTaskLine(editor, i);
       }
+    }
+  }
+  async processCheckedTasksInFile(file, content) {
+    const lines = content.split("\n");
+    const checkedTaskRegex = /^(\s*)-\s+\[x\]\s+(.*)$/i;
+    let hasChanges = false;
+    const newLines = [];
+    for (let i = 0; i < lines.length; i++) {
+      if (checkedTaskRegex.test(lines[i])) {
+        console.log(`Deleting checked task in ${file.path}: ${lines[i]}`);
+        hasChanges = true;
+      } else {
+        newLines.push(lines[i]);
+      }
+    }
+    if (hasChanges) {
+      const newContent = newLines.join("\n");
+      await this.app.vault.modify(file, newContent);
     }
   }
   deleteTaskLine(editor, lineNumber) {
